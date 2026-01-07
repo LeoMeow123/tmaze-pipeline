@@ -1,0 +1,67 @@
+[project]
+name = "tmaze-pipeline"
+version = "0.1.0"
+description = "Automated T-maze video analysis pipeline with pose estimation, ROI detection, and behavioral analysis"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "LeoMeow123", email = "y9li@ucsd.edu" }
+]
+keywords = ["tmaze", "behavior", "sleap", "pose-estimation", "neuroscience", "video-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "numpy>=1.26.0",
+    "pandas>=2.0.0",
+    "opencv-python>=4.8.0",
+    "pyyaml>=6.0",
+    "sleap-io>=0.2.0",
+    "shapely>=2.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+inference = [
+    "sleap-nn>=0.0.1",
+]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.1.0",
+]
+all = [
+    "tmaze-pipeline[inference,dev]",
+]
+
+[project.scripts]
+tmaze = "tmaze_pipeline.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/LeoMeow123/tmaze-pipeline"
+Repository = "https://github.com/LeoMeow123/tmaze-pipeline"
+Issues = "https://github.com/LeoMeow123/tmaze-pipeline/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tmaze_pipeline"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
