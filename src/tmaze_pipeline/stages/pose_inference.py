@@ -22,9 +22,18 @@ def run_pose_inference_batch(
     overwrite: bool = False,
     batch_size: int = 16,
     device: str = "cuda",
+    worker_id: int = 0,
+    num_workers: int = 1,
 ) -> dict:
     """
     Run pose inference on all videos in a directory.
+
+    For multi-GPU parallelism, run multiple processes with different worker_id values:
+        # Terminal 1 - GPU 0
+        tmaze pose-inference -i /videos --gpu 0 --worker-id 0 --num-workers 2
+
+        # Terminal 2 - GPU 1
+        tmaze pose-inference -i /videos --gpu 1 --worker-id 1 --num-workers 2
 
     Args:
         video_dir: Directory containing input videos
@@ -33,6 +42,8 @@ def run_pose_inference_batch(
         overwrite: Whether to overwrite existing outputs
         batch_size: Batch size for inference
         device: Device to run inference on (cuda, cuda:0, cuda:1, cpu)
+        worker_id: Worker ID for parallel processing (0-indexed)
+        num_workers: Total number of parallel workers
 
     Returns:
         Summary dict with counts
@@ -44,13 +55,23 @@ def run_pose_inference_batch(
     if not model_paths:
         raise ValueError("No pose models found. Please specify --model paths.")
 
-    videos = find_videos(video_dir, pattern="*.mp4")
+    all_videos = find_videos(video_dir, pattern="*.mp4")
+
+    # Partition videos across workers - each worker processes every Nth video
+    if num_workers > 1:
+        videos = [v for idx, v in enumerate(all_videos) if idx % num_workers == worker_id]
+        print(f"Worker {worker_id + 1}/{num_workers}: processing {len(videos)}/{len(all_videos)} videos")
+    else:
+        videos = all_videos
 
     results = {
         "total": len(videos),
+        "total_all": len(all_videos),
         "done": 0,
         "skipped": 0,
         "failed": 0,
+        "worker_id": worker_id,
+        "num_workers": num_workers,
         "details": [],
     }
 

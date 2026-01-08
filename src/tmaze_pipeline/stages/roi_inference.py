@@ -19,20 +19,29 @@ def run_roi_inference_batch(
     video_dir: Path,
     output_dir: Path,
     model_paths: Optional[list[Path]] = None,
-    n_workers: int = 1,
     overwrite: bool = False,
     frames_to_check: int = 10,
+    worker_id: int = 0,
+    num_workers: int = 1,
 ) -> dict:
     """
     Run ROI inference on all videos in a directory.
+
+    For multi-GPU parallelism, run multiple processes with different worker_id values:
+        # Terminal 1 - GPU 0
+        tmaze roi-inference -i /videos -o /output --gpu 0 --worker-id 0 --num-workers 2
+
+        # Terminal 2 - GPU 1
+        tmaze roi-inference -i /videos -o /output --gpu 1 --worker-id 1 --num-workers 2
 
     Args:
         video_dir: Directory containing input videos
         output_dir: Directory for output .slp files
         model_paths: List of model paths [centroid, centered_instance]
-        n_workers: Number of parallel workers (default 1 for GPU)
         overwrite: Whether to overwrite existing outputs
         frames_to_check: Number of frames to check for best ROI
+        worker_id: Worker ID for parallel processing (0-indexed)
+        num_workers: Total number of parallel workers
 
     Returns:
         Summary dict with counts
@@ -46,22 +55,26 @@ def run_roi_inference_batch(
     if not model_paths:
         raise ValueError("No ROI models found. Please specify --model paths.")
 
-    videos = find_videos(video_dir, pattern="*.mp4")
+    all_videos = find_videos(video_dir, pattern="*.mp4")
 
-    def process_one(video_path: Path) -> dict:
-        return run_single_video_inference(
+    # Partition videos across workers - each worker processes every Nth video
+    if num_workers > 1:
+        videos = [v for idx, v in enumerate(all_videos) if idx % num_workers == worker_id]
+        print(f"Worker {worker_id + 1}/{num_workers}: processing {len(videos)}/{len(all_videos)} videos")
+    else:
+        videos = all_videos
+
+    results = []
+    for i, video_path in enumerate(videos, 1):
+        result = run_single_video_inference(
             video_path=video_path,
             output_dir=output_dir,
             model_paths=model_paths,
             overwrite=overwrite,
             frames_to_check=frames_to_check,
         )
-
-    # For GPU inference, typically run single-threaded
-    if n_workers == 1:
-        results = [process_one(v) for v in videos]
-    else:
-        results = run_parallel(videos, process_one, n_workers=n_workers, desc="ROI Inference")
+        results.append(result)
+        print(f"[{i}/{len(videos)}] {result.get('status', 'error').upper():5} {video_path.name}")
 
     # Summarize
     passed = sum(1 for r in results if r.get("status") == "ok")
@@ -70,9 +83,12 @@ def run_roi_inference_batch(
 
     return {
         "total": len(videos),
+        "total_all": len(all_videos),
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
+        "worker_id": worker_id,
+        "num_workers": num_workers,
         "results": results,
     }
 

@@ -158,17 +158,38 @@ def run(ctx, input_dir, output_dir, meta_csv, n_workers, skip_distortion, skip_p
               help="Batch size for inference")
 @click.option("--device", "-d", type=str, default="cuda",
               help="Device for inference (cuda, cuda:0, cuda:1, cpu)")
+@click.option("--gpu", "-g", type=int, default=None,
+              help="GPU device ID (shorthand for --device cuda:N)")
+@click.option("--worker-id", type=int, default=0,
+              help="Worker ID for multi-GPU parallel processing (0-indexed)")
+@click.option("--num-workers", type=int, default=1,
+              help="Total number of parallel workers (for multi-GPU)")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing outputs")
 @click.pass_context
-def pose_inference(ctx, input_dir, output_dir, model_paths, batch_size, device, overwrite):
-    """Run pose estimation inference on videos (mouse body keypoints)."""
+def pose_inference(ctx, input_dir, output_dir, model_paths, batch_size, device, gpu, worker_id, num_workers, overwrite):
+    """Run pose estimation inference on videos (mouse body keypoints).
+
+    For multi-GPU parallelism, run multiple instances with different worker IDs:
+
+        # Terminal 1 - GPU 0
+        tmaze pose-inference -i /videos --gpu 0 --worker-id 0 --num-workers 2
+
+        # Terminal 2 - GPU 1
+        tmaze pose-inference -i /videos --gpu 1 --worker-id 1 --num-workers 2
+    """
     from tmaze_pipeline.stages.pose_inference import run_pose_inference_batch
+
+    # Handle --gpu shorthand
+    if gpu is not None:
+        device = f"cuda:{gpu}"
 
     console.print(f"[bold]Running pose inference[/]")
     console.print(f"Input: {input_dir}")
     console.print(f"Output: {output_dir or '(co-located with videos)'}")
     console.print(f"Batch size: {batch_size}")
     console.print(f"Device: {device}")
+    if num_workers > 1:
+        console.print(f"Worker: {worker_id + 1}/{num_workers}")
 
     model_paths = list(model_paths) if model_paths else None
     results = run_pose_inference_batch(
@@ -178,6 +199,8 @@ def pose_inference(ctx, input_dir, output_dir, model_paths, batch_size, device, 
         overwrite=overwrite,
         batch_size=batch_size,
         device=device,
+        worker_id=worker_id,
+        num_workers=num_workers,
     )
 
     console.print(f"\n[green]Done: {results['done']}/{results['total']} videos[/]")
@@ -241,25 +264,48 @@ def check_distortion(ctx, input_dir, output_file, num_frames, squares_x, squares
               help="Output directory for ROI .slp files")
 @click.option("--model", "-m", "model_paths", type=click.Path(exists=True), multiple=True,
               help="Model paths (centroid and centered_instance)")
-@click.option("--workers", "-w", "n_workers", type=int, default=1,
-              help="Number of parallel workers")
+@click.option("--device", "-d", type=str, default="cuda",
+              help="Device for inference (cuda, cuda:0, cuda:1, cpu)")
+@click.option("--gpu", "-g", type=int, default=None,
+              help="GPU device ID (shorthand for --device cuda:N)")
+@click.option("--worker-id", type=int, default=0,
+              help="Worker ID for multi-GPU parallel processing (0-indexed)")
+@click.option("--num-workers", type=int, default=1,
+              help="Total number of parallel workers (for multi-GPU)")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing outputs")
 @click.pass_context
-def roi_inference(ctx, input_dir, output_dir, model_paths, n_workers, overwrite):
-    """Run ROI keypoint inference on videos."""
+def roi_inference(ctx, input_dir, output_dir, model_paths, device, gpu, worker_id, num_workers, overwrite):
+    """Run ROI keypoint inference on videos.
+
+    For multi-GPU parallelism, run multiple instances with different worker IDs:
+
+        # Terminal 1 - GPU 0
+        tmaze roi-inference -i /videos -o /output --gpu 0 --worker-id 0 --num-workers 2
+
+        # Terminal 2 - GPU 1
+        tmaze roi-inference -i /videos -o /output --gpu 1 --worker-id 1 --num-workers 2
+    """
     from tmaze_pipeline.stages.roi_inference import run_roi_inference_batch
+
+    # Handle --gpu shorthand
+    if gpu is not None:
+        device = f"cuda:{gpu}"
 
     console.print(f"[bold]Running ROI inference[/]")
     console.print(f"Input: {input_dir}")
     console.print(f"Output: {output_dir}")
+    console.print(f"Device: {device}")
+    if num_workers > 1:
+        console.print(f"Worker: {worker_id + 1}/{num_workers}")
 
     model_paths = list(model_paths) if model_paths else None
     results = run_roi_inference_batch(
         video_dir=Path(input_dir),
         output_dir=Path(output_dir),
         model_paths=model_paths,
-        n_workers=n_workers,
         overwrite=overwrite,
+        worker_id=worker_id,
+        num_workers=num_workers,
     )
 
     console.print(f"[green]Completed: {results['passed']}/{results['total']} videos[/]")

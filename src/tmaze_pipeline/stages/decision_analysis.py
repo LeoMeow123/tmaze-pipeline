@@ -17,6 +17,7 @@ Output files:
 
 from pathlib import Path
 from typing import Optional
+from functools import partial
 import re
 import numpy as np
 import pandas as pd
@@ -27,6 +28,7 @@ from shapely.ops import unary_union
 
 from tmaze_pipeline.config import PipelineConfig
 from tmaze_pipeline.utils.video import read_fps
+from tmaze_pipeline.utils.parallel import run_parallel
 
 # Default thresholds
 MIN_DEPTH_PX = 50  # Minimum depth from junction to qualify as "deep entry"
@@ -63,8 +65,8 @@ def run_decision_analysis(
         yml_dir: Directory containing ROI .yml files
         meta_csv: CSV with day,mouse,reward columns
         output_dir: Output directory for CSVs
-        n_workers: Number of parallel workers
-        min_depth_px: Minimum depth threshold for commit (default 270)
+        n_workers: Number of parallel workers (CPU-bound, can use many workers)
+        min_depth_px: Minimum depth threshold for commit (default 50)
         config: Optional pipeline config for thresholds
 
     Returns:
@@ -86,25 +88,40 @@ def run_decision_analysis(
     # Find videos
     videos = sorted(video_dir.glob("*.mp4"))
 
-    # Process videos
+    # Create worker function with bound arguments
+    worker_fn = partial(
+        process_single_video,
+        yml_dir=yml_dir,
+        meta_map=meta_map,
+        min_depth_px=min_depth_px,
+        config=config,
+    )
+
+    # Process videos in parallel (CPU-bound analysis)
+    if n_workers > 1:
+        print(f"Running decision analysis with {n_workers} parallel workers...")
+        results = run_parallel(
+            items=videos,
+            worker_fn=lambda v: worker_fn(video_path=v),
+            n_workers=n_workers,
+            desc="Decision Analysis",
+        )
+    else:
+        # Sequential processing with progress output
+        results = []
+        for i, video_path in enumerate(videos, 1):
+            result = worker_fn(video_path=video_path)
+            results.append(result)
+            status_str = result.get("status", "ok")
+            print(f"[{i}/{len(videos)}] {status_str:10} {video_path.name}")
+
+    # Collect events and decisions from results
     events_rows = []
     decisions_rows = []
-
-    for i, video_path in enumerate(videos, 1):
-        result = process_single_video(
-            video_path=video_path,
-            yml_dir=yml_dir,
-            meta_map=meta_map,
-            min_depth_px=min_depth_px,
-            config=config,
-        )
-
+    for result in results:
         if result["status"] == "ok":
             events_rows.append(result["events"])
             decisions_rows.append(result["decisions"])
-
-        status_str = result.get("status", "ok")
-        print(f"[{i}/{len(videos)}] {status_str:10} {video_path.name}")
 
     # Save events.csv
     if events_rows:
