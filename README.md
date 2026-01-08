@@ -50,6 +50,63 @@ tmaze analyze-decisions --videos /path/to/videos --yml /path/to/roi_yml --meta m
 tmaze analyze-gait --input gait_per_stride.csv --output gait_filtered.csv
 ```
 
+## Parallel Processing
+
+For large datasets (500+ videos), use parallel processing to speed up analysis.
+
+### Multi-GPU Inference
+
+Run multiple processes on different GPUs simultaneously. Each worker processes a subset of videos.
+
+```bash
+# 2 GPUs - pose inference
+tmaze pose-inference -i /videos --gpu 0 --worker-id 0 --num-workers 2 &
+tmaze pose-inference -i /videos --gpu 1 --worker-id 1 --num-workers 2 &
+wait
+
+# 2 GPUs - ROI inference
+tmaze roi-inference -i /videos -o /output --gpu 0 --worker-id 0 --num-workers 2 &
+tmaze roi-inference -i /videos -o /output --gpu 1 --worker-id 1 --num-workers 2 &
+wait
+```
+
+| Flag | Description |
+|------|-------------|
+| `--gpu N` | GPU device ID (shorthand for `--device cuda:N`) |
+| `--worker-id K` | Worker ID, 0-indexed |
+| `--num-workers M` | Total number of parallel workers |
+
+Videos are partitioned by index: worker K processes videos where `index % M == K`.
+
+### Multi-Core Decision Analysis
+
+Decision analysis is CPU-bound and can use multiple cores:
+
+```bash
+# Use 8 CPU cores
+tmaze analyze-decisions --videos /path --yml /rois --meta meta.csv --workers 8
+```
+
+### Recommended Workflow
+
+```bash
+# Step 1: Multi-GPU pose inference
+tmaze pose-inference -i /videos --gpu 0 --worker-id 0 --num-workers 2 &
+tmaze pose-inference -i /videos --gpu 1 --worker-id 1 --num-workers 2 &
+wait
+
+# Step 2: Multi-GPU ROI inference
+tmaze roi-inference -i /videos -o /roi_slp --gpu 0 --worker-id 0 --num-workers 2 &
+tmaze roi-inference -i /videos -o /roi_slp --gpu 1 --worker-id 1 --num-workers 2 &
+wait
+
+# Step 3: Convert ROI to YAML (fast, single process)
+tmaze convert-roi -i /roi_slp -o /roi_yml
+
+# Step 4: Multi-core decision analysis
+tmaze analyze-decisions --videos /videos --yml /roi_yml --meta meta.csv -w 8
+```
+
 ## Pipeline Stages
 
 1. **Video Scan** - Discover and validate input videos
