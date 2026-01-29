@@ -242,8 +242,3 @@ This pipeline only provides stride **filtering** (`analyze-gait` command). The a
 ## License
 
 MIT License - see LICENSE file
-
-## Authors
-
-- Leo Li (y9li@ucsd.edu) - Primary author
-- Claude (AI assistant, Anthropic) - Co-author
