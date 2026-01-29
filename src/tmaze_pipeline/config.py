@@ -158,8 +158,14 @@ def calculate_px_per_cm(roi_yaml_path: Path) -> dict:
     """
     Calculate pixels per cm from ROI polygon dimensions.
 
-    Uses arm_right height (top to bottom) to estimate px_per_cm based on
-    known arm length of 27.5 cm.
+    Uses min(arm_width, arm_height) to estimate px_per_cm based on known arm
+    length of 27.5 cm. This handles both horizontal and vertical T-maze
+    orientations correctly.
+
+    Note: Different T-maze orientations (horizontal vs vertical) will have
+    different coordinate systems. This function uses the smaller dimension
+    of the arm polygon to ensure consistent calibration regardless of
+    orientation.
 
     Returns:
         Dict with px_per_cm, cm_per_px, and calibration details
@@ -182,36 +188,52 @@ def calculate_px_per_cm(roi_yaml_path: Path) -> dict:
     if not arm_right_coords or len(arm_right_coords) < 4:
         return {"px_per_cm": None, "cm_per_px": None, "error": "arm_right not found"}
 
-    # Calculate arm height in pixels
-    # arm_right goes from top to junction boundary
+    # Calculate arm dimensions in pixels
+    # Use min(width, height) to handle both horizontal and vertical T-maze orientations
     pts = np.array(arm_right_coords)
+    x_coords = pts[:, 0]
     y_coords = pts[:, 1]
+    arm_width_px = x_coords.max() - x_coords.min()
     arm_height_px = y_coords.max() - y_coords.min()
+
+    # Use the smaller dimension as the arm length reference
+    # This ensures consistent calibration regardless of T-maze orientation
+    arm_length_px = min(arm_width_px, arm_height_px)
+    orientation = "horizontal" if arm_width_px > arm_height_px else "vertical"
 
     # Calculate junction width for maze width calibration
     if junction_coords and len(junction_coords) >= 4:
         jpts = np.array(junction_coords)
-        x_coords = jpts[:, 0]
-        junction_width_px = x_coords.max() - x_coords.min()
+        jx_coords = jpts[:, 0]
+        jy_coords = jpts[:, 1]
+        junction_width_px = jx_coords.max() - jx_coords.min()
+        junction_height_px = jy_coords.max() - jy_coords.min()
     else:
         junction_width_px = None
+        junction_height_px = None
 
     # Calculate px_per_cm
     arm_length_cm = MAZE_DIMENSIONS["arm_length_cm"]
-    px_per_cm = arm_height_px / arm_length_cm
+    px_per_cm = arm_length_px / arm_length_cm
 
     result = {
         "px_per_cm": float(px_per_cm),
         "cm_per_px": 1.0 / px_per_cm,
+        "arm_length_px": float(arm_length_px),
+        "arm_width_px": float(arm_width_px),
         "arm_height_px": float(arm_height_px),
         "arm_length_cm": arm_length_cm,
-        "calibration_method": "arm_right_height",
+        "tmaze_orientation": orientation,
+        "calibration_method": "arm_min_dimension",
     }
 
-    if junction_width_px:
+    if junction_width_px is not None:
         maze_width_cm = MAZE_DIMENSIONS["maze_width_cm"]
-        px_per_cm_width = junction_width_px / maze_width_cm
+        # Use smaller junction dimension for width calibration
+        junction_min_px = min(junction_width_px, junction_height_px)
+        px_per_cm_width = junction_min_px / maze_width_cm
         result["junction_width_px"] = float(junction_width_px)
+        result["junction_height_px"] = float(junction_height_px)
         result["maze_width_cm"] = maze_width_cm
         result["px_per_cm_from_width"] = float(px_per_cm_width)
 

@@ -221,10 +221,29 @@ tailbase, tail1, tail2, tail3, tailtip
 - NumPy, Pandas, Shapely
 - Click, Rich (for CLI)
 
+## Known Limitations
+
+### T-Maze Orientation
+This pipeline was developed for horizontal T-maze setups. When using with different T-maze orientations (vertical), be aware of:
+
+1. **Calibration**: The `calculate_px_per_cm()` function now uses `min(width, height)` of the arm polygon to handle both orientations correctly.
+
+2. **Gait Analysis**: If performing gait analysis (external to this pipeline), use `stride_length_euclid_cm` (Euclidean distance) instead of `stride_length_cm` (signed X-projection). The signed projection can be affected by coordinate system orientation differences between setups.
+
+3. **Decision Analysis**: The arm entry detection is NOT affected by orientation as it uses body coverage percentages rather than signed coordinates.
+
+### Gait Metric Computation
+This pipeline only provides stride **filtering** (`analyze-gait` command). The actual gait metric computation (stride length, speed, duty factor, etc.) is done in separate analysis notebooks. When computing gait metrics:
+
+- Use `stride_length_euclid_cm` for stride length (always positive)
+- Be aware that different T-maze orientations may have different egocentric coordinate systems
+- Consider analyzing batches with different orientations separately
+
 ## License
 
 MIT License - see LICENSE file
 
-## Author
+## Authors
 
-LeoMeow123 (y9li@ucsd.edu)
+- Leo Li (y9li@ucsd.edu) - Primary author
+- Claude (AI assistant, Anthropic) - Co-author
