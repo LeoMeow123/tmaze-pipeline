@@ -46,8 +46,11 @@ tmaze pose-inference --input /path/to/videos --output /path/to/poses
 # Analyze T-maze decisions
 tmaze analyze-decisions --videos /path/to/videos --yml /path/to/roi_yml --meta metadata.csv
 
-# Filter gait strides
+# Filter gait strides (single output — edge removal only)
 tmaze analyze-gait --input gait_per_stride.csv --output gait_filtered.csv
+
+# Filter gait strides (tiered — produces all four filter levels)
+tmaze analyze-gait --input gait_per_stride.csv --output-dir /path/to/gait_out --tiered
 ```
 
 ## Parallel Processing
@@ -165,8 +168,23 @@ Simplified metrics for analysis:
 day,mouse,trial,stem,video_path,choice_LR,latency_choice_ms,stem_latency_ms,junction_explore_ms,reward,correct_TF,correct_bin,probes_L,probes_R,probe_frames_L,probe_frames_R
 ```
 
-#### gait_filtered.csv
-Filtered stride data after confidence and edge filtering.
+#### Gait Stride CSVs (tiered filtering)
+
+When using `--tiered` mode, four CSVs are produced with progressively stricter filters:
+
+| File | Filter | Use case |
+|------|--------|----------|
+| `gait_per_stride.csv` | Raw (post-confidence) | Full dataset |
+| `gait_per_stride_edge_only.csv` | First/last stride per video removed | Edge-clean dataset |
+| `gait_per_stride_edge_forward.csv` | Edge + forward-direction only | **Regional gait analysis** (stem/junction/arm) |
+| `gait_per_stride_filtered.csv` | Edge + forward + angular velocity [-20,20] | Straight-walking gait metrics |
+
+The **edge+forward** tier (`gait_per_stride_edge_forward.csv`) is designed for regional
+gait analysis where the angular-velocity filter would remove nearly all strides in the
+junction (turning zone) and most arm strides.
+
+The forward-direction filter checks the median sign of `stride_length_cm` (positive = forward
+for GoPro setups) and keeps only strides with the same sign.
 
 ## Configuration
 
@@ -238,6 +256,10 @@ This pipeline only provides stride **filtering** (`analyze-gait` command). The a
 - Use `stride_length_euclid_cm` for stride length (always positive)
 - Be aware that different T-maze orientations may have different egocentric coordinate systems
 - Consider analyzing batches with different orientations separately
+
+### Choosing Gait Filter Tiers
+- **Global gait analysis** (overall stride length, speed, etc.): use `gait_per_stride_filtered.csv` (tier 4 -- strictest)
+- **Regional gait analysis** (stem vs junction vs arm): use `gait_per_stride_edge_forward.csv` (tier 3 -- no angular-velocity filter, preserves turning strides in junction and arm regions)
 
 ## License
 

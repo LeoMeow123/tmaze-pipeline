@@ -5,6 +5,15 @@ Adapted from: 2025-12-12-GoPro-Tmaz-gait-analysis/01.filter_strides_by_confidenc
 
 This module filters gait stride data based on confidence thresholds
 and removes edge strides from continuous sequences.
+
+Filter tiers (cumulative):
+    1. gait_per_stride.csv          — raw strides
+    2. gait_per_stride_edge_only.csv — first/last stride per video removed
+    3. gait_per_stride_edge_forward.csv — edge + forward-direction only
+    4. gait_per_stride_filtered.csv — edge + forward + angular-velocity [-20,20]
+
+Tier 3 is designed for regional gait analysis (stem/junction/arm) where
+the angular-velocity filter would remove nearly all turning strides.
 """
 
 from pathlib import Path
@@ -14,6 +23,71 @@ import numpy as np
 
 from tmaze_pipeline.config import PipelineConfig
 
+
+# ---------------------------------------------------------------------------
+# Forward-direction filter
+# ---------------------------------------------------------------------------
+
+def filter_forward_direction(
+    df: pd.DataFrame,
+    stride_length_col: str = "stride_length_cm",
+) -> pd.DataFrame:
+    """Keep only forward-direction strides.
+
+    Forward direction is determined by the sign of the median stride length.
+    For GoPro T-maze videos the median is typically positive.  Strides whose
+    ``stride_length_cm`` has the opposite sign are walking backward and are
+    removed.
+
+    Args:
+        df: DataFrame with at least ``stride_length_col``.
+        stride_length_col: Column containing signed stride length.
+
+    Returns:
+        Filtered copy of *df* with backward strides removed.
+    """
+    if stride_length_col not in df.columns or len(df) == 0:
+        return df.copy()
+
+    median_sl = df[stride_length_col].median()
+    forward_sign = np.sign(median_sl)
+    if forward_sign == 0:
+        return df.copy()
+    return df[(df[stride_length_col] * forward_sign) >= 0].copy()
+
+
+# ---------------------------------------------------------------------------
+# Angular-velocity filter
+# ---------------------------------------------------------------------------
+
+def filter_angular_velocity(
+    df: pd.DataFrame,
+    angvel_col: str = "angular_velocity_deg_s_mean",
+    lo: float = -20.0,
+    hi: float = 20.0,
+) -> pd.DataFrame:
+    """Keep strides whose mean angular velocity falls within [lo, hi].
+
+    This removes turning strides.  **Not suitable for regional gait analysis**
+    (junction/arm) because most strides in those regions involve turns.
+
+    Args:
+        df: DataFrame with *angvel_col*.
+        angvel_col: Column name for angular velocity.
+        lo: Lower bound (inclusive).
+        hi: Upper bound (inclusive).
+
+    Returns:
+        Filtered copy of *df*.
+    """
+    if angvel_col not in df.columns or len(df) == 0:
+        return df.copy()
+    return df[(df[angvel_col] >= lo) & (df[angvel_col] <= hi)].copy()
+
+
+# ---------------------------------------------------------------------------
+# Main entry point — tiered filtering
+# ---------------------------------------------------------------------------
 
 def filter_strides(
     stride_csv: Path,
@@ -131,6 +205,100 @@ def filter_strides(
         print(f"{'='*60}\n")
 
     return stats
+
+
+def filter_strides_tiered(
+    stride_csv: Path,
+    output_dir: Path,
+    confidence_csv: Optional[Path] = None,
+    confidence_threshold: float = 0.3,
+    angvel_range: tuple[float, float] = (-20.0, 20.0),
+    config: Optional[PipelineConfig] = None,
+    verbose: bool = True,
+) -> dict:
+    """Produce all four filter tiers from a single raw stride CSV.
+
+    Outputs written to *output_dir*:
+
+    ======================================  ====================================
+    File                                    Description
+    ======================================  ====================================
+    ``gait_per_stride.csv``                 Copy of the raw input
+    ``gait_per_stride_edge_only.csv``       First/last stride per video removed
+    ``gait_per_stride_edge_forward.csv``    Edge + forward-direction only
+    ``gait_per_stride_filtered.csv``        Edge + forward + angular-velocity
+    ======================================  ====================================
+
+    Args:
+        stride_csv: Input CSV with per-stride gait data.
+        output_dir: Directory for all output CSVs.
+        confidence_csv: Optional per-video keypoint confidence CSV.
+        confidence_threshold: Minimum pose confidence to keep a stride.
+        angvel_range: (lo, hi) inclusive bounds for angular-velocity filter.
+        config: Optional pipeline config (provides *gait_keypoints*).
+        verbose: Print progress and summary counts.
+
+    Returns:
+        Dict with stride counts at each tier.
+    """
+    if config is None:
+        config = PipelineConfig()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- Load raw strides ------------------------------------------------
+    df_raw = pd.read_csv(stride_csv)
+    n_raw = len(df_raw)
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print("GAIT STRIDE FILTERING (tiered)")
+        print(f"{'='*60}")
+        print(f"  Loaded {n_raw:,} raw strides from {stride_csv}")
+
+    # ---- Confidence filter -----------------------------------------------
+    if confidence_csv and Path(confidence_csv).exists():
+        df_conf = pd.read_csv(confidence_csv)
+        df_raw = add_stride_confidence(df_raw, df_conf, config.gait_keypoints)
+    elif "stride_confidence" not in df_raw.columns:
+        df_raw["stride_confidence"] = 1.0
+    df_raw = df_raw[df_raw.get("stride_confidence", 1.0) > confidence_threshold].copy()
+    n_after_conf = len(df_raw)
+
+    # ---- Tier 1: raw (post-confidence) -----------------------------------
+    df_raw.to_csv(output_dir / "gait_per_stride.csv", index=False)
+
+    # ---- Tier 2: edge removal --------------------------------------------
+    df_edge = remove_edge_strides(df_raw)
+    n_edge = len(df_edge)
+    df_edge.to_csv(output_dir / "gait_per_stride_edge_only.csv", index=False)
+
+    # ---- Tier 3: edge + forward direction --------------------------------
+    df_edge_fwd = filter_forward_direction(df_edge)
+    n_edge_fwd = len(df_edge_fwd)
+    df_edge_fwd.to_csv(output_dir / "gait_per_stride_edge_forward.csv", index=False)
+
+    # ---- Tier 4: edge + forward + angular velocity -----------------------
+    df_filtered = filter_angular_velocity(df_edge_fwd, lo=angvel_range[0], hi=angvel_range[1])
+    n_filtered = len(df_filtered)
+    df_filtered.to_csv(output_dir / "gait_per_stride_filtered.csv", index=False)
+
+    if verbose:
+        print(f"  After confidence (>{confidence_threshold}): {n_after_conf:,}")
+        print(f"  Tier 2 — edge only:            {n_edge:,}")
+        print(f"  Tier 3 — edge + forward:       {n_edge_fwd:,}")
+        print(f"  Tier 4 — edge + fwd + angvel:  {n_filtered:,}")
+        print(f"  Output dir: {output_dir}")
+        print(f"{'='*60}\n")
+
+    return {
+        "raw": n_raw,
+        "after_confidence": n_after_conf,
+        "edge_only": n_edge,
+        "edge_forward": n_edge_fwd,
+        "filtered": n_filtered,
+        "output_dir": str(output_dir),
+    }
 
 
 def add_stride_confidence(

@@ -380,28 +380,66 @@ def analyze_decisions(ctx, video_dir, yml_dir, meta_csv, output_csv, n_workers):
 @click.option("--confidence", "-c", "conf_csv", type=click.Path(exists=True),
               help="Confidence CSV (optional)")
 @click.option("--output", "-o", "output_csv", type=click.Path(), default="gait_filtered.csv",
-              help="Output filtered CSV")
+              help="Output filtered CSV (single-tier mode)")
+@click.option("--output-dir", "output_dir", type=click.Path(), default=None,
+              help="Output directory for tiered CSVs (enables tiered mode)")
 @click.option("--threshold", "-t", type=float, default=0.3,
               help="Confidence threshold (default: 0.3)")
+@click.option("--tiered", is_flag=True, default=False,
+              help="Produce all four filter tiers (requires --output-dir)")
 @click.pass_context
-def analyze_gait(ctx, input_csv, conf_csv, output_csv, threshold):
-    """Filter and analyze gait stride data."""
-    from tmaze_pipeline.stages.gait_analysis import filter_strides
+def analyze_gait(ctx, input_csv, conf_csv, output_csv, output_dir, threshold, tiered):
+    """Filter and analyze gait stride data.
 
-    console.print(f"[bold]Filtering gait strides[/]")
-    console.print(f"Input: {input_csv}")
-    console.print(f"Threshold: {threshold}")
+    By default, produces a single filtered CSV (edge removal only).
 
-    results = filter_strides(
-        stride_csv=Path(input_csv),
-        confidence_csv=Path(conf_csv) if conf_csv else None,
-        output_csv=Path(output_csv),
-        confidence_threshold=threshold,
-    )
+    With --tiered (or --output-dir), produces four filter tiers:
 
-    console.print(f"[green]Original: {results['original']} strides[/]")
-    console.print(f"[green]After filtering: {results['filtered']} strides[/]")
-    console.print(f"Output saved to: {output_csv}")
+    \b
+      gait_per_stride.csv             raw (post-confidence)
+      gait_per_stride_edge_only.csv   first/last stride per video removed
+      gait_per_stride_edge_forward.csv  edge + forward-direction only
+      gait_per_stride_filtered.csv    edge + forward + angular-velocity
+    """
+    if tiered or output_dir:
+        from tmaze_pipeline.stages.gait_analysis import filter_strides_tiered
+
+        out = Path(output_dir) if output_dir else Path(output_csv).parent
+        console.print(f"[bold]Filtering gait strides (tiered)[/]")
+        console.print(f"Input: {input_csv}")
+        console.print(f"Output dir: {out}")
+        console.print(f"Threshold: {threshold}")
+
+        results = filter_strides_tiered(
+            stride_csv=Path(input_csv),
+            output_dir=out,
+            confidence_csv=Path(conf_csv) if conf_csv else None,
+            confidence_threshold=threshold,
+        )
+
+        console.print(f"\n[green]Raw:              {results['raw']:>8,} strides[/]")
+        console.print(f"[green]After confidence:  {results['after_confidence']:>8,} strides[/]")
+        console.print(f"[green]Edge only:         {results['edge_only']:>8,} strides[/]")
+        console.print(f"[green]Edge + forward:    {results['edge_forward']:>8,} strides[/]")
+        console.print(f"[green]Filtered (full):   {results['filtered']:>8,} strides[/]")
+        console.print(f"Output saved to: {out}")
+    else:
+        from tmaze_pipeline.stages.gait_analysis import filter_strides
+
+        console.print(f"[bold]Filtering gait strides[/]")
+        console.print(f"Input: {input_csv}")
+        console.print(f"Threshold: {threshold}")
+
+        results = filter_strides(
+            stride_csv=Path(input_csv),
+            confidence_csv=Path(conf_csv) if conf_csv else None,
+            output_csv=Path(output_csv),
+            confidence_threshold=threshold,
+        )
+
+        console.print(f"[green]Original: {results['original']} strides[/]")
+        console.print(f"[green]After filtering: {results['filtered']} strides[/]")
+        console.print(f"Output saved to: {output_csv}")
 
 
 @main.command("count-frames")
